@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>PicoWQuack</title>
+  <style>
+    :root { --bg:#000; --fg:#fff; --muted:#9aa; --accent:#6A5ACD; --run:#00AB66; --clear:#7CB9E8; --box:#111; --border:#333; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); display:flex; min-height:100vh; align-items:center; justify-content:center; font-family:system-ui, Arial, sans-serif; }
+    .wrap { width:min(960px, 95vw); display:grid; gap:14px; grid-template-columns: 1fr 1fr; }
+    .card { background:var(--box); border:1px solid var(--border); border-radius:10px; padding:14px; }
+    h2 { margin:0 0 10px 0; font-size:1.1rem; letter-spacing:.5px; }
+    textarea { width:100%; height:320px; background:#000; color:#0f0; border:1px solid #2b2b2b; font-family:"Courier New", monospace; padding:10px; border-radius:8px; resize:vertical; }
+    input { width:100%; padding:10px; border-radius:8px; border:1px solid #2b2b2b; background:#000; color:#fff; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    button { padding:10px 14px; border:none; border-radius:8px; cursor:pointer; color:#fff; background:#222; }
+    .btn-run{ background:var(--run); } .btn-ai{ background:var(--accent); } .btn-clear{ background:var(--clear); color:#000; } .btn-ghost{ background:#222; border:1px solid #444; }
+    .status{ background:#0a0a0a; border:1px solid #262626; border-radius:8px; padding:10px; min-height:38px; font-size:.92rem; white-space:pre-wrap; }
+    ul.templates{ list-style:none; padding:0; margin:8px 0 0 0; display:grid; gap:6px; }
+    ul.templates li{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; border:1px solid #2a2a2a; border-radius:8px; background:#0b0b0b; }
+    .tname{ font-weight:600; }
+    .tbtns button{ padding:6px 10px; font-size:.85rem; }
+    @media (max-width: 860px){ .wrap{ grid-template-columns: 1fr; } textarea{ height:260px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Left -->
+    <div class="card">
+      <h2>HID Script</h2>
+      <textarea id="content" placeholder="HID script will appear here..."></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn-run" onclick="runPayload()">Run</button>
+        <button class="btn-ghost" onclick="saveFile()">Save</button>
+        <button class="btn-ghost" onclick="triggerFileInput()">Upload</button>
+        <input type="file" id="fileInput" style="display:none" onchange="handleFileSelect(event)" />
+        <button class="btn-clear" onclick="clearTextArea()">Clear</button>
+      </div>
+      <div id="status" class="status" style="margin-top:10px;">Status: ready.</div>
+    </div>
+
+    <!-- Right -->
+    <div class="card">
+      <h2>Payload Files (.dd) on Pico</h2>
+      <div class="row"><button class="btn-ghost" onclick="loadFromPico()">Refresh from Pico</button></div>
+      <ul class="templates" id="picoList" style="margin-top:8px;"></ul>
+    </div>
+  </div>
+
+  <script>
+    async function loadFromPico() {
+      updateStatus("Loading payload files...");
+      try {
+        const res = await fetch("/payloads");
+        const data = await res.json();
+        const list = document.getElementById("picoList");
+        list.innerHTML = "";
+        if (data.payloads && data.payloads.length) {
+          for (const p of data.payloads) {
+            const li = document.createElement("li");
+            const label = document.createElement("div"); label.className="tname"; label.textContent = p.name;
+            const btns = document.createElement("div"); btns.className="tbtns";
+            const b1=document.createElement("button"); b1.textContent="Load";   b1.onclick=()=>setArea(p.content||"","replace");
+            const b2=document.createElement("button"); b2.textContent="Append"; b2.onclick=()=>setArea(p.content||"","append");
+            const b3=document.createElement("button"); b3.textContent="Run";    b3.onclick=()=>{ setArea(p.content||"","replace"); runPayload(); };
+            btns.append(b1,b2,b3); li.append(label,btns); list.appendChild(li);
+          }
+          updateStatus("Loaded "+data.payloads.length+" payload(s).");
+        } else {
+          list.innerHTML = "<li>No .dd payloads found in Pico root.</li>";
+          updateStatus("No .dd files found.");
+        }
+      } catch (e) { updateStatus("Failed to load payloads: " + e); }
+    }
+
+    async function runPayload() {
+      const content = document.getElementById("content").value;
+      updateStatus("Sending payload...");
+      try {
+        const res = await fetch("/execute",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content})});
+        const data = await res.json();
+        updateStatus("Run result:\n" + JSON.stringify(data, null, 2));
+      } catch (e) { updateStatus("Run failed: " + e); }
+    }
+
+
+
+    function setArea(script, mode="replace"){
+      const ta = document.getElementById("content");
+      if (mode === "append" && ta.value.trim().length){ ta.value = ta.value.replace(/\s*$/,"") + "\n" + script + "\n"; }
+      else { ta.value = script; }
+      updateStatus("Template loaded.");
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (e) => { document.getElementById('content').value = e.target.result; updateStatus("Loaded file."); };
+      reader.readAsText(file);
+    }
+
+    function saveFile() {
+      const content = document.getElementById("content").value;
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "payload.txt";
+      link.click();
+      updateStatus("Saved payload.txt");
+    }
+
+    function triggerFileInput() { document.getElementById('fileInput').click(); }
+    function clearTextArea() { document.getElementById("content").value = ''; updateStatus("Cleared."); }
+    function updateStatus(msg) { document.getElementById("status").textContent = "Status: " + msg; }
+
+    // Load .dd files on first open
+    loadFromPico();
+  </script>
+</body>
+</html>
